@@ -85,19 +85,88 @@
     input, select {
       font: inherit;
       width: 100%;
-      padding: .45rem .55rem;
+      padding: .62rem .75rem;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 10px;
       background: #fff;
+      color: var(--ink);
     }
-    input[type="number"] { width: 6rem; }
+    select { cursor: pointer; }
     .row-actions, .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
     .toolbar { margin-bottom: 1rem; }
-    .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .45rem 1rem; }
-    .checks label, .field label { display: flex; gap: .45rem; align-items: center; }
-    .field { display: grid; gap: .3rem; }
-    .field label { font-size: .78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .8rem; }
+    .field { display: grid; gap: .35rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .8rem; }
+    .field label { font-size: .92rem; font-weight: 600; }
+    .hint, .lead { margin: 0; color: var(--muted); line-height: 1.4; }
+    .lead { margin-bottom: 1rem; }
+    .hint { font-size: .82rem; }
+    .settings { display: grid; gap: 1rem; }
+    .settings h2 { margin: 0 0 .35rem; }
+    .preview-box {
+      margin-top: .9rem;
+      padding: .8rem .95rem;
+      border-radius: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+    .preview-box span {
+      display: block;
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .preview-box code {
+      display: block;
+      margin-top: .3rem;
+      font-family: "IBM Plex Sans", sans-serif;
+      font-size: 1rem;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .toggles {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .65rem;
+    }
+    .toggle {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: .85rem;
+      margin: 0;
+      padding: .8rem .9rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .toggle strong { display: block; font-size: .95rem; }
+    .toggle small {
+      display: block;
+      margin-top: .2rem;
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.35;
+      font-weight: 400;
+    }
+    .toggle input {
+      width: 1.15rem;
+      height: 1.15rem;
+      margin: .15rem 0 0;
+      accent-color: var(--accent);
+      flex: none;
+      cursor: pointer;
+    }
+    .pair {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .8rem;
+      margin-top: 1rem;
+    }
+    .stack { display: grid; gap: .8rem; }
+    [hidden] { display: none !important; }
     .log { list-style: none; margin: 0; padding: 0; }
     .log li { padding: .65rem 0; border-bottom: 1px solid var(--line); }
     .log time { color: var(--muted); margin-right: .5rem; }
@@ -105,8 +174,8 @@
     .err { color: var(--danger); }
     .empty { color: var(--muted); padding: .4rem 0 0; }
     .badge { display: inline-block; padding: .12rem .45rem; border-radius: 999px; background: #f3e6d8; font-size: .75rem; }
-    @media (max-width: 720px) {
-      .group { grid-template-columns: 1fr; }
+    @media (max-width: 800px) {
+      .group, .toggles, .pair { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -141,60 +210,108 @@
     </section>
 
     <section id="settings" hidden>
-      <form class="panel" id="settings-form">
-        <div class="grid">
+      <form id="settings-form" class="settings">
+        <section class="panel">
+          <h2>Wohin die Musik kommt</h2>
+          <p class="lead">Neue Alben folgen dieser Struktur. Gibt es das Album schon, kommen die Titel in diesen Ordner.</p>
           <div class="field">
             <label for="layout">Verzeichnisstruktur</label>
             <select id="layout" name="layout"></select>
           </div>
-          <div class="field" id="custom-wrap">
+          <div class="preview-box">
+            <span>Beispiel</span>
+            <code id="preview">Adele/2011 - 21/01 - Rolling in the Deep.flac</code>
+          </div>
+          <div class="field" id="custom-wrap" hidden style="margin-top: .9rem">
             <label for="custom_pattern">Eigenes Muster</label>
             <input id="custom_pattern" name="custom_pattern" spellcheck="false" />
+            <p class="hint">{albumartist} {artist} {album} {year} {genre} {disc} {discfolder} {track} {title}</p>
           </div>
-        </div>
-        <p class="meta" id="preview"></p>
-        <p class="meta">Platzhalter: {albumartist} {artist} {album} {year} {genre} {disc} {discfolder} {track} {title}. Liegt dasselbe Album schon unter dem Interpreten, kommen neue Titel in diesen Ordner.</p>
-        <div class="checks">
-          <label><input type="checkbox" name="auto_move" /> Automatisch verschieben, wenn die Zuordnung sicher ist</label>
-          <label><input type="checkbox" name="prefer_existing" /> Bestehendes Album wiederverwenden</label>
-          <label><input type="checkbox" name="fetch_cover" /> Original-Cover suchen</label>
-          <label><input type="checkbox" name="embed_cover" /> Cover in die Datei schreiben</label>
-          <label><input type="checkbox" name="write_cover_file" /> cover.jpg im Albumordner ablegen</label>
-          <label><input type="checkbox" name="fetch_lyrics" /> Songtext suchen</label>
-          <label><input type="checkbox" name="overwrite_tags" /> Vorhandene Angaben ersetzen</label>
-          <label><input type="checkbox" name="scan_after_import" /> Navidrome danach neu einlesen</label>
-          <label><input type="checkbox" name="watch" /> Import-Ordner beobachten</label>
-        </div>
-        <div class="grid" style="margin-top:1rem">
-          <div class="field">
-            <label for="min_score">Mindestwert für automatisch</label>
-            <input id="min_score" name="min_score" type="number" min="0" max="100" />
+        </section>
+
+        <section class="panel">
+          <h2>Beim Einsortieren</h2>
+          <div class="toggles">
+            <label class="toggle">
+              <span><strong>Ordner beobachten</strong><small>Neue Dateien werden erkannt, sobald das Kopieren fertig ist.</small></span>
+              <input type="checkbox" name="watch" />
+            </label>
+            <label class="toggle">
+              <span><strong>Automatisch verschieben</strong><small>Nur bei sicherer Zuordnung. Sonst bleibt die Musik im Eingang.</small></span>
+              <input type="checkbox" name="auto_move" />
+            </label>
+            <label class="toggle">
+              <span><strong>Bestehendes Album verwenden</strong><small>Titel kommen in den Ordner, der schon unter dem Interpreten liegt.</small></span>
+              <input type="checkbox" name="prefer_existing" />
+            </label>
+            <label class="toggle">
+              <span><strong>Original-Cover suchen</strong><small>Fehlt ein Bild, wird das Albumcover aus dem Internet geholt.</small></span>
+              <input type="checkbox" name="fetch_cover" />
+            </label>
+            <label class="toggle">
+              <span><strong>Cover in die Datei schreiben</strong><small>Das Bild wird in die Audiodatei eingebettet.</small></span>
+              <input type="checkbox" name="embed_cover" />
+            </label>
+            <label class="toggle">
+              <span><strong>cover.jpg ablegen</strong><small>Zusätzlich im Albumordner, falls dort noch kein Bild liegt.</small></span>
+              <input type="checkbox" name="write_cover_file" />
+            </label>
+            <label class="toggle">
+              <span><strong>Songtext suchen</strong><small>Fehlender Text kommt in die Datei. Mit Zeiten liegt eine .lrc daneben.</small></span>
+              <input type="checkbox" name="fetch_lyrics" />
+            </label>
+            <label class="toggle">
+              <span><strong>Vorhandene Angaben ersetzen</strong><small>Aus: nur Lücken füllen. An: gefundene Angaben überschreiben.</small></span>
+              <input type="checkbox" name="overwrite_tags" />
+            </label>
           </div>
-          <div class="field">
-            <label for="stable_seconds">Warten nach dem Kopieren (Sekunden)</label>
-            <input id="stable_seconds" name="stable_seconds" type="number" min="3" max="180" />
+          <div class="pair">
+            <div class="field">
+              <label for="min_score">Sicher ab</label>
+              <input id="min_score" name="min_score" type="number" min="0" max="100" />
+              <p class="hint">0 bis 100. Darunter bleibt der Ordner im Eingang.</p>
+            </div>
+            <div class="field">
+              <label for="stable_seconds">Warten nach dem Kopieren</label>
+              <input id="stable_seconds" name="stable_seconds" type="number" min="3" max="180" />
+              <p class="hint">Sekunden, in denen die Datei nicht mehr wachsen darf.</p>
+            </div>
           </div>
-          <div class="field">
-            <label for="navidrome_url">Navidrome-URL</label>
-            <input id="navidrome_url" name="navidrome_url" placeholder="http://192.168.1.10:4533" />
+        </section>
+
+        <section class="panel">
+          <h2>Navidrome</h2>
+          <p class="lead">Damit die neuen Titel in der Bibliothek auftauchen.</p>
+          <label class="toggle" style="margin-bottom: .9rem">
+            <span><strong>Bibliothek neu einlesen</strong><small>Startet einen Scan, sobald Dateien verschoben wurden.</small></span>
+            <input type="checkbox" name="scan_after_import" />
+          </label>
+          <div class="stack">
+            <div class="field">
+              <label for="navidrome_url">Adresse</label>
+              <input id="navidrome_url" name="navidrome_url" placeholder="http://192.168.1.10:4533" />
+            </div>
+            <div class="pair" style="margin-top: 0">
+              <div class="field">
+                <label for="navidrome_user">Benutzer</label>
+                <input id="navidrome_user" name="navidrome_user" autocomplete="username" />
+              </div>
+              <div class="field">
+                <label for="navidrome_password">Passwort</label>
+                <input id="navidrome_password" name="navidrome_password" type="password" placeholder="unverändert lassen" autocomplete="current-password" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="acoustid_api_key">AcoustID-Key</label>
+              <input id="acoustid_api_key" name="acoustid_api_key" type="password" placeholder="optional, unverändert lassen" />
+              <p class="hint">Nur für Dateien ohne brauchbaren Namen. Sonst leer lassen.</p>
+            </div>
           </div>
-          <div class="field">
-            <label for="navidrome_user">Navidrome-Benutzer</label>
-            <input id="navidrome_user" name="navidrome_user" />
+          <div class="toolbar" style="margin: 1rem 0 0">
+            <button type="submit" class="primary">Speichern</button>
+            <button type="button" class="quiet" id="ping">Verbindung prüfen</button>
           </div>
-          <div class="field">
-            <label for="navidrome_password">Navidrome-Passwort</label>
-            <input id="navidrome_password" name="navidrome_password" type="password" placeholder="unverändert lassen" />
-          </div>
-          <div class="field">
-            <label for="acoustid_api_key">AcoustID-Key (optional)</label>
-            <input id="acoustid_api_key" name="acoustid_api_key" type="password" placeholder="unverändert lassen" />
-          </div>
-        </div>
-        <div class="toolbar" style="margin-top:1rem">
-          <button type="submit" class="primary">Speichern</button>
-          <button type="button" class="quiet" id="ping">Navidrome prüfen</button>
-        </div>
+        </section>
       </form>
     </section>
   </div>
@@ -439,7 +556,7 @@
       const pattern = document.getElementById("custom_pattern").value;
       try {
         const data = await api("/api/preview?layout=" + encodeURIComponent(layout) + "&pattern=" + encodeURIComponent(pattern));
-        document.getElementById("preview").textContent = "Beispiel: " + data.path;
+        document.getElementById("preview").textContent = data.path;
       } catch (error) {
         document.getElementById("preview").textContent = error.message;
       }
