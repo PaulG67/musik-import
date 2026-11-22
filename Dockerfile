@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gosu \
       passwd \
       ca-certificates \
-      chromaprint-tools \
+      libchromaprint-tools \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
