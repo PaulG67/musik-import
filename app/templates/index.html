@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Musik-Import</title>
+  <link rel="icon" href="/static/icon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,680&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: #fffaf3;
+      --ink: #24170f;
+      --muted: #6d5b4d;
+      --line: #e2d5c6;
+      --accent: #8a3d16;
+      --accent-hover: #6f3011;
+      --ok: #1d6b45;
+      --warn: #8a5a10;
+      --danger: #9d2c22;
+      --shadow: 0 12px 32px rgba(48, 28, 12, .08);
+      --radius: 16px;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --display: "Fraunces", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--font);
+      background:
+        radial-gradient(900px 420px at 0% -10%, #f3d7bf 0%, transparent 55%),
+        radial-gradient(700px 380px at 100% 0%, #eadfcf 0%, transparent 50%),
+        var(--bg);
+      min-height: 100vh;
+    }
+    .wrap { width: min(1100px, calc(100% - 2rem)); margin: 0 auto; padding: 1.6rem 0 3rem; }
+    header { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.1rem; }
+    header img { width: 56px; height: 56px; border-radius: 14px; }
+    h1 { margin: 0; font-family: var(--display); font-size: 2rem; font-weight: 560; }
+    header p { margin: .2rem 0 0; color: var(--muted); }
+    .tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .tabs button, button {
+      font: inherit;
+      font-weight: 600;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: .55rem 1rem;
+      cursor: pointer;
+    }
+    .tabs button.active { background: var(--accent); color: #fff; border-color: transparent; }
+    button.primary { background: var(--accent); color: #fff; border-color: transparent; border-radius: 10px; }
+    button.primary:hover { background: var(--accent-hover); }
+    button.quiet { border-radius: 10px; }
+    button.danger { color: var(--danger); background: #fff6f4; border-color: #f0c2bb; border-radius: 10px; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .status { min-height: 1.3rem; color: var(--muted); margin: 0 0 .8rem; }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--danger); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+    }
+    .group { display: grid; grid-template-columns: 92px 1fr; gap: 1rem; }
+    .cover {
+      width: 92px; height: 92px; border-radius: 12px; object-fit: cover;
+      background: #efe4d6; border: 1px solid var(--line);
+    }
+    .cover.ph {
+      display: grid; place-items: center; color: var(--muted); font-size: .75rem; text-align: center;
+    }
+    .kicker { color: var(--muted); font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
+    h2 { margin: .15rem 0 .35rem; font-family: var(--display); font-size: 1.35rem; font-weight: 560; }
+    .meta { color: var(--muted); margin: 0 0 .7rem; }
+    .files { width: 100%; border-collapse: collapse; }
+    .files th { text-align: left; font-size: .75rem; color: var(--muted); font-weight: 600; padding: .3rem; }
+    .files td { padding: .3rem; vertical-align: middle; }
+    input, select {
+      font: inherit;
+      width: 100%;
+      padding: .45rem .55rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    input[type="number"] { width: 6rem; }
+    .row-actions, .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+    .toolbar { margin-bottom: 1rem; }
+    .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .45rem 1rem; }
+    .checks label, .field label { display: flex; gap: .45rem; align-items: center; }
+    .field { display: grid; gap: .3rem; }
+    .field label { font-size: .78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .8rem; }
+    .log { list-style: none; margin: 0; padding: 0; }
+    .log li { padding: .65rem 0; border-bottom: 1px solid var(--line); }
+    .log time { color: var(--muted); margin-right: .5rem; }
+    .warn { color: var(--warn); }
+    .err { color: var(--danger); }
+    .empty { color: var(--muted); padding: .4rem 0 0; }
+    .badge { display: inline-block; padding: .12rem .45rem; border-radius: 999px; background: #f3e6d8; font-size: .75rem; }
+    @media (max-width: 720px) {
+      .group { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="/static/icon.svg" alt="" />
+      <div>
+        <h1>Musik-Import</h1>
+        <p id="paths">Neue Dateien analysieren und in die Navidrome-Bibliothek einsortieren.</p>
+      </div>
+    </header>
+    <nav class="tabs">
+      <button type="button" class="active" data-tab="inbox">Eingang</button>
+      <button type="button" data-tab="log">Verlauf</button>
+      <button type="button" data-tab="settings">Einstellungen</button>
+    </nav>
+    <p class="status" id="status"></p>
+
+    <section id="inbox">
+      <div class="toolbar">
+        <button type="button" class="primary" id="scan">Jetzt analysieren</button>
+        <span class="badge" id="watch">…</span>
+      </div>
+      <div id="groups"></div>
+    </section>
+
+    <section id="log" hidden>
+      <div class="panel">
+        <ul class="log" id="log-list"></ul>
+      </div>
+    </section>
+
+    <section id="settings" hidden>
+      <form class="panel" id="settings-form">
+        <div class="grid">
+          <div class="field">
+            <label for="layout">Verzeichnisstruktur</label>
+            <select id="layout" name="layout"></select>
+          </div>
+          <div class="field" id="custom-wrap">
+            <label for="custom_pattern">Eigenes Muster</label>
+            <input id="custom_pattern" name="custom_pattern" spellcheck="false" />
+          </div>
+        </div>
+        <p class="meta" id="preview"></p>
+        <p class="meta">Platzhalter: {albumartist} {artist} {album} {year} {genre} {disc} {discfolder} {track} {title}. Liegt dasselbe Album schon unter dem Interpreten, kommen neue Titel in diesen Ordner.</p>
+        <div class="checks">
+          <label><input type="checkbox" name="auto_move" /> Automatisch verschieben, wenn die Zuordnung sicher ist</label>
+          <label><input type="checkbox" name="prefer_existing" /> Bestehendes Album wiederverwenden</label>
+          <label><input type="checkbox" name="fetch_cover" /> Original-Cover suchen</label>
+          <label><input type="checkbox" name="embed_cover" /> Cover in die Datei schreiben</label>
+          <label><input type="checkbox" name="write_cover_file" /> cover.jpg im Albumordner ablegen</label>
+          <label><input type="checkbox" name="fetch_lyrics" /> Songtext suchen</label>
+          <label><input type="checkbox" name="overwrite_tags" /> Vorhandene Angaben ersetzen</label>
+          <label><input type="checkbox" name="scan_after_import" /> Navidrome danach neu einlesen</label>
+          <label><input type="checkbox" name="watch" /> Import-Ordner beobachten</label>
+        </div>
+        <div class="grid" style="margin-top:1rem">
+          <div class="field">
+            <label for="min_score">Mindestwert für automatisch</label>
+            <input id="min_score" name="min_score" type="number" min="0" max="100" />
+          </div>
+          <div class="field">
+            <label for="stable_seconds">Warten nach dem Kopieren (Sekunden)</label>
+            <input id="stable_seconds" name="stable_seconds" type="number" min="3" max="180" />
+          </div>
+          <div class="field">
+            <label for="navidrome_url">Navidrome-URL</label>
+            <input id="navidrome_url" name="navidrome_url" placeholder="http://192.168.1.10:4533" />
+          </div>
+          <div class="field">
+            <label for="navidrome_user">Navidrome-Benutzer</label>
+            <input id="navidrome_user" name="navidrome_user" />
+          </div>
+          <div class="field">
+            <label for="navidrome_password">Navidrome-Passwort</label>
+            <input id="navidrome_password" name="navidrome_password" type="password" placeholder="unverändert lassen" />
+          </div>
+          <div class="field">
+            <label for="acoustid_api_key">AcoustID-Key (optional)</label>
+            <input id="acoustid_api_key" name="acoustid_api_key" type="password" placeholder="unverändert lassen" />
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top:1rem">
+          <button type="submit" class="primary">Speichern</button>
+          <button type="button" class="quiet" id="ping">Navidrome prüfen</button>
+        </div>
+      </form>
+    </section>
+  </div>
+  <script>
+    const statusEl = document.getElementById("status");
+    const groupsEl = document.getElementById("groups");
+    let settings = null;
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text || "";
+      statusEl.className = "status" + (kind ? " " + kind : "");
+    }
+
+    async function api(path, options) {
+      const response = await fetch(path, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || data.message || "Anfrage fehlgeschlagen");
+      return data;
+    }
+
+    function el(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text != null) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+
+    function field(value) {
+      const input = document.createElement("input");
+      input.value = value == null ? "" : value;
+      return input;
+    }
+
+    function showTab(name) {
+      for (const button of document.querySelectorAll(".tabs button")) {
+        button.classList.toggle("active", button.dataset.tab === name);
+      }
+      for (const id of ["inbox", "log", "settings"]) {
+        document.getElementById(id).hidden = id !== name;
+      }
+    }
+
+    document.querySelectorAll(".tabs button").forEach((button) => {
+      button.addEventListener("click", () => showTab(button.dataset.tab));
+    });
+
+    function renderInbox(data) {
+      groupsEl.replaceChildren();
+      if (!data.groups.length) {
+        const box = el("div", "", "panel");
+        box.append(
+          el("h2", "Import ist leer"),
+          el("p", "Lege Alben oder einzelne Dateien in den Import-Ordner. Die App wartet, bis der Kopiervorgang fertig ist, ergänzt Cover und Texte und verschiebt die Musik dann in die Bibliothek.", "empty")
+        );
+        groupsEl.append(box);
+        return;
+      }
+      for (const group of data.groups) {
+        const panel = el("article", "", "panel");
+        const grid = el("div", "", "group");
+        let cover;
+        if (group.cover) {
+          cover = document.createElement("img");
+          cover.className = "cover";
+          cover.alt = "";
+          cover.src = "/api/cover?key=" + encodeURIComponent(group.key);
+        } else {
+          cover = el("div", "kein Cover", "cover ph");
+        }
+        const body = el("div");
+        body.append(el("div", group.single ? "Datei" : "Album", "kicker"));
+        body.append(el("h2", group.key));
+        const bits = [group.reason || ""];
+        if (group.dest) bits.push("Ziel: " + group.dest);
+        if (group.score != null) bits.push("Wert " + group.score);
+        body.append(el("p", bits.filter(Boolean).join(" · "), "meta"));
+
+        const albumartist = field((group.files[0] && group.files[0].albumartist) || "");
+        const album = field((group.files[0] && group.files[0].album) || "");
+        const year = field((group.files[0] && group.files[0].year) || "");
+        const head = el("div", "", "grid");
+        head.append(labeled("Interpret", albumartist), labeled("Album", album), labeled("Jahr", year));
+        body.append(head);
+
+        const table = document.createElement("table");
+        table.className = "files";
+        const thead = document.createElement("thead");
+        const hr = document.createElement("tr");
+        for (const label of ["Nr", "Titel", "Interpret", "Datei"]) {
+          hr.append(el("th", label));
+        }
+        thead.append(hr);
+        table.append(thead);
+        const tbody = document.createElement("tbody");
+        const rows = [];
+        for (const file of group.files) {
+          const tr = document.createElement("tr");
+          const track = field(file.track || "");
+          track.style.width = "4rem";
+          const title = field(file.title || "");
+          const artist = field(file.artist || "");
+          tr.append(cell(track), cell(title), cell(artist), el("td", file.name));
+          tbody.append(tr);
+          rows.push({ file, track, title, artist });
+        }
+        table.append(tbody);
+        body.append(table);
+
+        const actions = el("div", "", "row-actions");
+        actions.style.marginTop = ".8rem";
+        const apply = el("button", "Übernehmen");
+        apply.className = "primary";
+        apply.type = "button";
+        const retry = el("button", "Erneut suchen");
+        retry.className = "quiet";
+        retry.type = "button";
+        const dismiss = el("button", "Nicht importieren");
+        dismiss.className = "danger";
+        dismiss.type = "button";
+        apply.addEventListener("click", () => runGroup("/api/groups/apply", group, albumartist, album, year, rows));
+        retry.addEventListener("click", () => runGroup("/api/groups/retry", group));
+        dismiss.addEventListener("click", () => runGroup("/api/groups/dismiss", group));
+        actions.append(apply, retry, dismiss);
+        body.append(actions);
+        grid.append(cover, body);
+        panel.append(grid);
+        groupsEl.append(panel);
+      }
+    }
+
+    function labeled(text, input) {
+      const wrap = el("div", "", "field");
+      const id = "f-" + Math.random().toString(36).slice(2);
+      input.id = id;
+      const label = document.createElement("label");
+      label.htmlFor = id;
+      label.textContent = text;
+      wrap.append(label, input);
+      return wrap;
+    }
+
+    function cell(node) {
+      const td = document.createElement("td");
+      td.append(node);
+      return td;
+    }
+
+    async function runGroup(path, group, albumartist, album, year, rows) {
+      setStatus("Speichere …");
+      const payload = { key: group.key };
+      if (albumartist) {
+        payload.albumartist = albumartist.value;
+        payload.album = album.value;
+        payload.year = year.value;
+        payload.files = rows.map(({ file, track, title, artist }) => ({
+          rel: file.rel,
+          track: track.value,
+          title: title.value,
+          artist: artist.value
+        }));
+      }
+      try {
+        const result = await api(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (result.message && result.status === "error") setStatus(result.message, "err");
+        else if (result.status === "moved") setStatus(result.count + " Datei(en) einsortiert", "ok");
+        else if (result.status === "held") setStatus(result.message || "Bitte prüfen");
+        else if (result.status === "dismissed") setStatus("Beiseite gelegt", "ok");
+        else setStatus(result.message || "Fertig", "ok");
+        await refresh();
+      } catch (error) {
+        setStatus(error.message, "err");
+      }
+    }
+
+    function renderLog(data) {
+      const list = document.getElementById("log-list");
+      list.replaceChildren();
+      if (!data.entries.length) {
+        list.append(el("li", "Noch nichts einsortiert.", "empty"));
+        return;
+      }
+      for (const entry of data.entries) {
+        const li = document.createElement("li");
+        if (entry.level === "warn") li.className = "warn";
+        if (entry.level === "error") li.className = "err";
+        const time = document.createElement("time");
+        time.textContent = (entry.time || "").replace("T", " ");
+        li.append(time, document.createTextNode(entry.message || ""));
+        list.append(li);
+      }
+    }
+
+    async function refresh() {
+      const [box, log, current] = await Promise.all([
+        api("/api/inbox"),
+        api("/api/log"),
+        api("/api/settings")
+      ]);
+      settings = current;
+      document.getElementById("paths").textContent =
+        "Import: " + current.import_dir + "  →  Bibliothek: " + current.music_dir;
+      document.getElementById("watch").textContent = current.watch ? "Beobachtung an" : "Beobachtung aus";
+      renderInbox(box);
+      renderLog(log);
+      fillSettings(current);
+    }
+
+    function fillSettings(current) {
+      const select = document.getElementById("layout");
+      if (!select.options.length) {
+        for (const [value, label] of Object.entries(current.layouts || {})) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.append(option);
+        }
+      }
+      select.value = current.layout;
+      document.getElementById("custom_pattern").value = current.custom_pattern || "";
+      for (const name of ["auto_move", "prefer_existing", "fetch_cover", "embed_cover", "write_cover_file", "fetch_lyrics", "overwrite_tags", "scan_after_import", "watch"]) {
+        const input = document.querySelector(`[name="${name}"]`);
+        if (input) input.checked = !!current[name];
+      }
+      document.getElementById("min_score").value = current.min_score;
+      document.getElementById("stable_seconds").value = current.stable_seconds;
+      document.getElementById("navidrome_url").value = current.navidrome_url || "";
+      document.getElementById("navidrome_user").value = current.navidrome_user || "";
+      toggleCustom();
+      updatePreview();
+    }
+
+    function toggleCustom() {
+      document.getElementById("custom-wrap").hidden = document.getElementById("layout").value !== "custom";
+    }
+
+    async function updatePreview() {
+      const layout = document.getElementById("layout").value;
+      const pattern = document.getElementById("custom_pattern").value;
+      try {
+        const data = await api("/api/preview?layout=" + encodeURIComponent(layout) + "&pattern=" + encodeURIComponent(pattern));
+        document.getElementById("preview").textContent = "Beispiel: " + data.path;
+      } catch (error) {
+        document.getElementById("preview").textContent = error.message;
+      }
+    }
+
+    document.getElementById("layout").addEventListener("change", () => { toggleCustom(); updatePreview(); });
+    document.getElementById("custom_pattern").addEventListener("input", updatePreview);
+
+    document.getElementById("scan").addEventListener("click", async () => {
+      setStatus("Analysiere …");
+      try {
+        const result = await api("/api/scan", { method: "POST" });
+        if (result.busy) setStatus("Läuft bereits");
+        else setStatus((result.moved || 0) + " einsortiert, " + (result.held || 0) + " zur Prüfung", "ok");
+        await refresh();
+      } catch (error) {
+        setStatus(error.message, "err");
+      }
+    });
+
+    document.getElementById("settings-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const payload = {
+        layout: form.layout.value,
+        custom_pattern: form.custom_pattern.value,
+        min_score: Number(form.min_score.value),
+        stable_seconds: Number(form.stable_seconds.value),
+        navidrome_url: form.navidrome_url.value,
+        navidrome_user: form.navidrome_user.value,
+        navidrome_password: form.navidrome_password.value,
+        acoustid_api_key: form.acoustid_api_key.value
+      };
+      for (const name of ["auto_move", "prefer_existing", "fetch_cover", "embed_cover", "write_cover_file", "fetch_lyrics", "overwrite_tags", "scan_after_import", "watch"]) {
+        payload[name] = form[name].checked;
+      }
+      try {
+        settings = await api("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        form.navidrome_password.value = "";
+        form.acoustid_api_key.value = "";
+        setStatus("Gespeichert", "ok");
+        await refresh();
+      } catch (error) {
+        setStatus(error.message, "err");
+      }
+    });
+
+    document.getElementById("ping").addEventListener("click", async () => {
+      const form = document.getElementById("settings-form");
+      try {
+        const result = await api("/api/navidrome/ping", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            navidrome_url: form.navidrome_url.value,
+            navidrome_user: form.navidrome_user.value,
+            navidrome_password: form.navidrome_password.value
+          })
+        });
+        setStatus(result.message, result.ok ? "ok" : "err");
+      } catch (error) {
+        setStatus(error.message, "err");
+      }
+    });
+
+    refresh().catch((error) => setStatus(error.message, "err"));
+    setInterval(() => {
+      if (document.getElementById("inbox").hidden) return;
+      if (document.activeElement && groupsEl.contains(document.activeElement)) return;
+      refresh().catch(() => {});
+    }, 8000);
+  </script>
+</body>
+</html>

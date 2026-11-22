@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Musik-Import">
+  <rect width="128" height="128" rx="28" fill="#2a160f"/>
+  <circle cx="52" cy="58" r="34" fill="#e7b84a"/>
+  <circle cx="52" cy="58" r="13" fill="#2a160f"/>
+  <circle cx="52" cy="58" r="4" fill="#e7b84a"/>
+  <rect x="74" y="74" width="40" height="34" rx="10" fill="#f7efe4"/>
+  <path d="M84 91h16" fill="none" stroke="#8a3d16" stroke-width="4" stroke-linecap="round"/>
+  <path d="M94 83l8 8-8 8" fill="none" stroke="#8a3d16" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,20 @@
+services:
+  musik-import:
+    image: ghcr.io/paulg67/musik-import:latest
+    build: .
+    container_name: musik-import
+    restart: unless-stopped
+    environment:
+      PORT: "8793"
+      TZ: Europe/Zurich
+      PUID: "99"
+      PGID: "100"
+      NAVIDROME_URL: ""
+      NAVIDROME_USER: ""
+      NAVIDROME_PASSWORD: ""
+    ports:
+      - "8793:8793"
+    volumes:
+      - ./import:/import
+      - ./music:/music
+      - ./config:/config

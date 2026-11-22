@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>musik-import</Name>
+  <Repository>ghcr.io/paulg67/musik-import:latest</Repository>
+  <Registry>https://github.com/users/PaulG67/packages/container/package/musik-import</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/PaulG67/musik-import/issues</Support>
+  <Project>https://github.com/PaulG67/musik-import</Project>
+  <Overview>Neue Musik aus dem Import-Ordner analysieren, fehlende Angaben (Cover, Songtext, MusicBrainz) ergaenzen und in die Navidrome-Bibliothek verschieben. Die Verzeichnisstruktur ist in der Web-UI waehlbar. Bestehende Alben werden wiederverwendet. Danach kann Navidrome neu eingelesen werden.&#13;
+&#13;
+Der Import-Ordner darf nicht in der Navidrome-Bibliothek liegen, sonst indexiert Navidrome unfertige Dateien.&#13;
+&#13;
+SETUP: bash &lt;(curl -fsSL https://raw.githubusercontent.com/PaulG67/musik-import/main/unraid/install-template.sh)&#13;
+Danach Docker - Container hinzufuegen - Template musik-import.&#13;
+Updates: Docker - musik-import - Force Update. Neue Felder nur mit Edit - Apply. Nicht ins Internet freigeben.</Overview>
+  <Category>MediaApp:Music Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8793]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/PaulG67/musik-import/main/unraid/my-musik-import.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/PaulG67/musik-import/main/icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText></DonateText>
+  <DonateLink></DonateLink>
+  <Requires>Import-Ordner ausserhalb der Navidrome-Bibliothek. Musik-Pfad ist derselbe Share wie bei Navidrome.</Requires>
+  <Config Name="WebUI Port" Target="8793" Default="8793" Mode="tcp" Description="Web-Oberflaeche. Container-Port bleibt 8793, hier nur der Host-Port." Type="Port" Display="always" Required="true" Mask="false">8793</Config>
+  <Config Name="Import" Target="/import" Default="/mnt/user/appdata/musik-import/import" Mode="rw" Description="Hier neue Musik ablegen. Nicht in die Navidrome-Bibliothek legen." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/musik-import/import</Config>
+  <Config Name="Musikbibliothek" Target="/music" Default="/mnt/user/music" Mode="rw" Description="Derselbe Ordner, den Navidrome als Bibliothek liest." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/music</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/musik-import" Mode="rw" Description="Einstellungen, Verlauf und Cover-Cache" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/musik-import</Config>
+  <Config Name="Navidrome URL" Target="NAVIDROME_URL" Default="" Mode="" Description="Optional, z. B. http://192.168.1.10:4533. Dann startet nach dem Einsortieren ein Scan." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Navidrome Benutzer" Target="NAVIDROME_USER" Default="" Mode="" Description="Benutzer fuer den Subsonic-Scan" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Navidrome Passwort" Target="NAVIDROME_PASSWORD" Default="" Mode="" Description="Passwort fuer den Subsonic-Scan" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Verzeichnisstruktur" Target="LAYOUT" Default="artist_year_album" Mode="" Description="artist_year_album, artist_album, artist_album_year oder artist_album_cd. Die Web-UI kann das spaeter aendern." Type="Variable" Display="always" Required="false" Mask="false">artist_year_album</Config>
+  <Config Name="AcoustID Key" Target="ACOUSTID_API_KEY" Default="" Mode="" Description="Optional. Kostenloser Key von acoustid.org, fuer Dateien ohne brauchbaren Namen." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User-ID (Unraid nobody = 99)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group-ID (Unraid users = 100)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="Europe/Zurich" Mode="" Description="Zeitzone" Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Zurich</Config>
+  <Config Name="PORT" Target="PORT" Default="8793" Mode="" Description="Interner Port, unveraendert lassen" Type="Variable" Display="advanced" Required="false" Mask="false">8793</Config>
+</Container>

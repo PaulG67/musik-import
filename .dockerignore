@@ -1,0 +1,13 @@
+.git
+.github
+.cursor
+__pycache__
+*.pyc
+.venv
+venv
+tests
+*.md
+.pytest_cache
+import
+music
+config
