@@ -88,6 +88,7 @@
       background: #fff7ea; border: 1px solid #ead7b6;
     }
     .duplicate p { margin: 0; color: var(--warn); font-size: .92rem; line-height: 1.4; }
+    .result { display: block; margin-top: .25rem; color: var(--ok); font-size: .78rem; line-height: 1.35; }
     .duplicate button { flex: none; white-space: nowrap; }
     input, select {
       font: inherit;
@@ -421,7 +422,11 @@
           track.style.width = "4rem";
           const title = field(file.title || "");
           const artist = field(file.artist || "");
-          tr.append(cell(track), cell(title), cell(artist), el("td", file.name));
+          const fileCell = document.createElement("td");
+          fileCell.append(document.createTextNode(file.name));
+          const result = resultText(file);
+          if (result) fileCell.append(el("span", result, "result"));
+          tr.append(cell(track), cell(title), cell(artist), fileCell);
           tbody.append(tr);
           rows.push({ file, track, title, artist });
         }
@@ -465,6 +470,19 @@
         panel.append(grid);
         groupsEl.append(panel);
       }
+    }
+
+    function resultText(file) {
+      if (!file.source && file.score == null && !file.has_cover && !file.has_lyrics) return "";
+      const bits = [];
+      if (file.source === "musicbrainz") bits.push("MusicBrainz");
+      else if (file.source === "filename" || file.source === "tags") bits.push("Aus der Datei");
+      else if (file.source === "user") bits.push("Übernommen");
+      else if (file.source) bits.push(file.source);
+      if (file.has_cover) bits.push("Cover");
+      if (file.has_lyrics) bits.push("Text");
+      if (file.score != null) bits.push("Wert " + file.score);
+      return bits.join(" · ");
     }
 
     function labeled(text, input) {

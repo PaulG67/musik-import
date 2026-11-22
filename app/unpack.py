@@ -21,22 +21,24 @@ class UnpackError(RuntimeError):
     pass
 
 
-def unpack_pending(root: Path, *, force: bool, stable_seconds: int) -> list[tuple[str, str]]:
+def unpack_pending(root: Path, *, force: bool, stable_seconds: int) -> tuple[list[tuple[str, str]], set[str]]:
     messages: list[tuple[str, str]] = []
+    fresh: set[str] = set()
     for _ in range(5):
         archives = _zip_files(root)
         if not archives:
             break
         extracted = 0
         for path in archives:
-            level, message, done = _unpack_one(root, path, force=force, stable_seconds=stable_seconds)
+            level, message, folder = _unpack_one(root, path, force=force, stable_seconds=stable_seconds)
             if message:
                 messages.append((level, message))
-            if done:
+            if folder:
+                fresh.add(folder)
                 extracted += 1
         if not extracted:
             break
-    return messages
+    return messages, fresh
 
 
 def _zip_files(root: Path) -> list[Path]:
@@ -53,18 +55,18 @@ def _zip_files(root: Path) -> list[Path]:
     return found
 
 
-def _unpack_one(root: Path, path: Path, *, force: bool, stable_seconds: int) -> tuple[str, str, bool]:
+def _unpack_one(root: Path, path: Path, *, force: bool, stable_seconds: int) -> tuple[str, str, str]:
     rel = path.relative_to(root).as_posix()
     key = f"zip:{rel}"
     try:
         fingerprint = _fingerprint(path)
     except OSError as exc:
-        return "error", f"{path.name}: {exc}", False
+        return "error", f"{path.name}: {exc}", ""
     previous = (load().get("items") or {}).get(key) or {}
     if not force and previous.get("fingerprint") == fingerprint and previous.get("status") == "error":
-        return "", "", False
+        return "", "", ""
     if not force and not _settled(path, stable_seconds):
-        return "", "", False
+        return "", "", ""
     parent = path.parent
     temp = parent / f".unpack-{hashlib.sha1(rel.encode('utf-8')).hexdigest()[:12]}"
     try:
@@ -80,9 +82,9 @@ def _unpack_one(root: Path, path: Path, *, force: bool, stable_seconds: int) -> 
         shutil.rmtree(temp, ignore_errors=True)
         message = _message(path.name, exc)
         _remember(key, fingerprint, message)
-        return "error", f"{path.name}: {message}", False
+        return "error", f"{path.name}: {message}", ""
     _forget(key)
-    return "info", f"{path.name} ausgepackt nach {target.name}", True
+    return "info", f"{path.name} ausgepackt nach {target.name}", target.relative_to(root).as_posix()
 
 
 def _extract(archive: Path, dest: Path) -> int:

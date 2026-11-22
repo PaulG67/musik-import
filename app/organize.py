@@ -301,11 +301,12 @@ def _scan(source, settings: dict, *, force: bool) -> dict:
 
     state = load()
     index: dict = {}
-    for level, message in unpack_pending(
+    notes, fresh = unpack_pending(
         import_dir(),
         force=force,
         stable_seconds=int(settings["stable_seconds"]),
-    ):
+    )
+    for level, message in notes:
         _log(level, message)
     for group in collect_groups():
         if not group["paths"]:
@@ -322,7 +323,11 @@ def _scan(source, settings: dict, *, force: bool) -> dict:
         ):
             held += 1
             continue
-        if not force and not _stable(group["paths"], int(settings["stable_seconds"])):
+        if (
+            not force
+            and not _from_archive(group["key"], fresh)
+            and not _stable(group["paths"], int(settings["stable_seconds"]))
+        ):
             continue
         outcome = process_group(group, settings, source, trust=False, index=index)
         if int(outcome.get("count") or 0):
@@ -774,7 +779,7 @@ def _cover_bytes(paths, group, metas, settings, source) -> bytes | None:
         if embedded:
             return embedded
     local = _local_cover(paths, group)
-    if not settings.get("fetch_cover", True):
+    if local or not settings.get("fetch_cover", True):
         return local
     primary = next((meta for meta in metas if meta.mb_release_id), metas[0] if metas else None)
     data = None
@@ -794,27 +799,47 @@ def _local_cover(paths, group) -> bytes | None:
     seen = set()
     while current not in seen:
         seen.add(current)
-        for name in COVER_NAMES:
-            candidate = current / name
-            try:
-                if candidate.is_file() and candidate.stat().st_size < 20 * 1024 * 1024:
-                    return candidate.read_bytes()
-            except OSError:
-                continue
+        found = _folder_cover(current)
+        if found is not None:
+            return found.read_bytes()
         if current == root or root not in current.parents:
             break
         current = current.parent
     top = import_dir() / group["key"]
-    if top.is_dir():
-        for name in COVER_NAMES:
-            candidate = top / name
-            if candidate.is_file():
-                return candidate.read_bytes()
+    found = _folder_cover(top)
+    if found is not None:
+        return found.read_bytes()
+    return None
+
+
+def _folder_cover(folder: Path) -> Path | None:
+    if not folder.is_dir():
+        return None
+    wanted = {name.lower() for name in COVER_NAMES}
+    images = []
+    try:
+        children = list(folder.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not child.is_file() or child.name.startswith("."):
+            continue
+        try:
+            if child.stat().st_size >= 20 * 1024 * 1024:
+                continue
+        except OSError:
+            continue
+        if child.name.lower() in wanted:
+            return child
+        if child.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+            images.append(child)
+    if len(images) == 1:
+        return images[0]
     return None
 
 
 def _write_cover_file(folder: Path, cover: bytes) -> None:
-    if any((folder / name).exists() for name in COVER_NAMES):
+    if _folder_cover(folder) is not None:
         return
     name = "cover.png" if image_mime(cover) == "image/png" else "cover.jpg"
     target = folder / name
@@ -985,6 +1010,10 @@ def _is_import_audio(root: Path, path: Path) -> bool:
         return False
     rel = path.relative_to(root)
     return not any(part in IGNORED_DIRS or part.startswith(".") for part in rel.parts[:-1])
+
+
+def _from_archive(key: str, fresh: set[str]) -> bool:
+    return any(key == folder or key.startswith(folder + "/") for folder in fresh)
 
 
 def _stable(paths: list[Path], seconds: int) -> bool:
