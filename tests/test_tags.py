@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.tags import Tags, read_tags, write_tags
+from app.tags import Quality, Tags, is_better, read_cover, read_tags, write_tags
 
 
 def test_mp3_roundtrip(tmp_path: Path):
@@ -46,3 +46,15 @@ def test_mp3_roundtrip(tmp_path: Path):
     assert kept.title == "Rolling in the Deep"
     assert kept.genre == "Soul"
     assert kept.lyrics == "We could have had it all"
+    assert read_cover(path).startswith(b"\xff\xd8\xff")
+
+
+def test_better_quality_prefers_lossless_then_bitrate():
+    low = Quality(bitrate=128_000)
+    high = Quality(bitrate=320_000)
+    flac = Quality(bitrate=900_000, lossless=True, bits=16, sample_rate=44100)
+    assert is_better(high, low)
+    assert not is_better(low, high)
+    assert not is_better(high, high)
+    assert is_better(flac, high)
+    assert not is_better(high, flac)

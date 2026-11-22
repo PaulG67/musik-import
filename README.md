@@ -11,7 +11,7 @@ Ergänzt wird, was fehlt:
 
 Die Verzeichnisstruktur ist wählbar. Liegt dasselbe Album schon unter dem Interpreten, kommen neue Titel in diesen Ordner. Danach kann Navidrome einen Scan starten und die Titel erscheinen in der Bibliothek.
 
-Unsichere Dateien bleiben im Import. In der Web-UI korrigierst du die Angaben und übernimmst sie. Dateien, die am Ziel schon existieren, landen in `Import/_duplikate` und überschreiben nichts.
+Unsichere Dateien bleiben im Import. In der Web-UI korrigierst du die Angaben und übernimmst sie. Gibt es denselben Titel schon in der Bibliothek, gewinnt die bessere Qualität: verlustfrei vor verlustbehaftet, sonst die höhere Bitrate. Die schlechtere Datei bleibt im Import, mit Hinweis und der Möglichkeit, sie zu löschen.
 
 ## Unraid
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 import threading
 import time
@@ -17,8 +18,19 @@ from app.navidrome import start_scan
 from app.ownership import ensure_dir, explain_io, hand_over
 from app.parse import disc_from_dirname, folder_hint, parse_filename
 from app.store import load, now, update
-from app.tags import AUDIO_EXT, TagError, Tags, image_mime, read_tags, write_tags
-from app.textutil import year_of
+from app.tags import (
+    AUDIO_EXT,
+    TagError,
+    Tags,
+    image_mime,
+    is_better,
+    quality_label,
+    read_cover,
+    read_quality,
+    read_tags,
+    write_tags,
+)
+from app.textutil import similarity, year_of
 
 logger = logging.getLogger("musik-import")
 
@@ -69,11 +81,25 @@ def inbox() -> dict:
                 "reason": item.get("reason")
                 or ("Wartet, bis der Kopiervorgang fertig ist" if not stable else "Noch nicht analysiert"),
                 "dest": item.get("dest") or "",
-                "cover": bool(item.get("cover")),
+                "cover": _group_has_art(group, item),
                 "files": files,
             }
         )
     return {"groups": groups}
+
+
+def cover_for(key: str):
+    cached = cover_path(key)
+    if cached is not None:
+        return cached
+    group = _find_group(key)
+    if group is None:
+        return None
+    for path in group["paths"]:
+        data = read_cover(path)
+        if data:
+            return data
+    return _local_cover(group["paths"], group)
 
 
 def cover_path(key: str) -> Path | None:
@@ -98,6 +124,42 @@ def apply_group(key: str, overrides: dict | None = None, source=None) -> dict:
 
 def retry_group(key: str, source=None) -> dict:
     return _with_group(key, trust=False, overrides=None, source=source)
+
+
+def delete_import(key: str, rels: list[str]) -> dict:
+    group = _find_group(key)
+    if group is None:
+        return {"status": "error", "message": "Nicht mehr im Import"}
+    wanted = {item for item in rels if item}
+    if not wanted:
+        return {"status": "error", "message": "Datei fehlt"}
+    if not _lock.acquire(blocking=True, timeout=120):
+        return {"status": "error", "message": "Import läuft bereits"}
+    try:
+        root = import_dir().resolve()
+        removed = []
+        for path in group["paths"]:
+            rel = path.relative_to(import_dir()).as_posix()
+            if rel not in wanted or not path.exists():
+                continue
+            resolved = path.resolve()
+            if resolved != root and root not in resolved.parents:
+                continue
+            path.unlink()
+            sidecar = path.with_suffix(".lrc")
+            if sidecar.is_file():
+                sidecar.unlink()
+            removed.append(path.name)
+        if removed:
+            _log("info", "Aus dem Import gelöscht: " + ", ".join(removed))
+
+        def mut(data):
+            data["items"].pop(key, None)
+
+        update(mut)
+        return {"status": "deleted", "count": len(removed), "message": f"{len(removed)} Datei(en) aus dem Import gelöscht"}
+    finally:
+        _lock.release()
 
 
 def dismiss_group(key: str) -> dict:
@@ -147,7 +209,7 @@ def collect_groups(root: Path | None = None) -> list[dict]:
     return [buckets[key] for key in sorted(buckets)]
 
 
-def process_group(group: dict, settings: dict, source, *, trust: bool = False, overrides: dict | None = None) -> dict:
+def process_group(group: dict, settings: dict, source, *, trust: bool = False, overrides: dict | None = None, index: dict | None = None) -> dict:
     paths = [path for path in group["paths"] if path.exists()]
     if not paths:
         return {"status": "empty", "count": 0}
@@ -185,7 +247,7 @@ def process_group(group: dict, settings: dict, source, *, trust: bool = False, o
     if not ready:
         _remember_held(group, decisions, cover, settings)
         return {"status": "held", "count": 0, "message": "Bitte prüfen"}
-    return _commit(group, decisions, cover, settings, source)
+    return _commit(group, decisions, cover, settings, source, index if index is not None else {})
 
 
 def hint_from(path: Path, tags: Tags, group: dict) -> Hint:
@@ -237,6 +299,7 @@ def _scan(source, settings: dict, *, force: bool) -> dict:
     from app.store import load
 
     state = load()
+    index: dict = {}
     for group in collect_groups():
         if not group["paths"]:
             continue
@@ -248,16 +311,16 @@ def _scan(source, settings: dict, *, force: bool) -> dict:
         if (
             not force
             and previous.get("fingerprint") == fingerprint
-            and previous.get("status") in {"held", "error"}
+            and previous.get("status") in {"held", "error", "duplicate"}
         ):
             held += 1
             continue
         if not force and not _stable(group["paths"], int(settings["stable_seconds"])):
             continue
-        outcome = process_group(group, settings, source, trust=False)
-        if outcome["status"] == "moved":
-            moved += int(outcome.get("count") or 0)
-        elif outcome["status"] in {"held", "error"}:
+        outcome = process_group(group, settings, source, trust=False, index=index)
+        if int(outcome.get("count") or 0):
+            moved += int(outcome["count"])
+        if outcome["status"] in {"held", "error", "duplicate"}:
             held += 1
         state = load()
     return {"busy": False, "moved": moved, "held": held}
@@ -273,7 +336,7 @@ def _with_group(key: str, *, trust: bool, overrides: dict | None, source) -> dic
         settings = load_settings()
         active = source or WebMetadata(settings)
         result = process_group(group, settings, active, trust=trust, overrides=overrides)
-        if result.get("status") == "moved" and settings.get("scan_after_import") and settings.get("navidrome_url"):
+        if int(result.get("count") or 0) and settings.get("scan_after_import") and settings.get("navidrome_url"):
             ok, message = start_scan(
                 settings["navidrome_url"],
                 settings["navidrome_user"],
@@ -292,7 +355,7 @@ def _find_group(key: str) -> dict | None:
     return None
 
 
-def _commit(group, decisions, cover: bytes | None, settings: dict, source) -> dict:
+def _commit(group, decisions, cover: bytes | None, settings: dict, source, index: dict) -> dict:
     music = music_dir()
     try:
         ensure_dir(music)
@@ -301,77 +364,336 @@ def _commit(group, decisions, cover: bytes | None, settings: dict, source) -> di
         _remember(group, status="error", score=0, reason=message, dest="", cover="", files=[])
         return {"status": "error", "count": 0, "message": message}
     moved = []
-    duplicates = []
+    kept = []
     try:
         for item in decisions:
             path: Path = item["path"]
             merged = _compose_tags(item["tags"], item["meta"], item["hint"], settings)
-            lyrics_synced = ""
-            if _want_lyrics(item["tags"], settings):
-                try:
-                    plain, lyrics_synced = source.lyrics_for(
-                        item["meta"], item["tags"].duration or item["hint"].duration
-                    )
-                except Exception:
-                    logger.exception("Songtext")
-                    plain, lyrics_synced = "", ""
-                if plain and (settings.get("overwrite_tags") or not merged.lyrics):
-                    merged.lyrics = plain
-            file_cover = cover if settings.get("embed_cover", True) else None
-            write_tags(path, merged, cover=file_cover, only_missing=not settings.get("overwrite_tags"))
             fields = _fields(merged, path)
             dest = destination(music, fields, settings)
             if not within_root(music, dest):
                 raise TagError("Ziel liegt ausserhalb der Bibliothek")
-            place, kind = _plan(path, dest)
-            if kind == "duplicate":
-                duplicates.append(path)
+            wanted = _wanted(merged, item)
+            matches = _find_matches(music, dest, wanted, index)
+            same_paths = set()
+            for candidate in matches:
+                try:
+                    same_paths.add(candidate.resolve())
+                except OSError:
+                    continue
+            try:
+                dest_taken = dest.exists() and dest.resolve() not in same_paths
+            except OSError:
+                dest_taken = dest.exists()
+            if dest_taken:
+                kept.append(_blocked_row(item, dest))
                 continue
-            ensure_dir(place.parent)
-            shutil.move(str(path), str(place))
-            hand_over(place)
+            if matches:
+                existing = max(matches, key=_quality_rank)
+                new_quality = read_quality(path)
+                old_quality = read_quality(existing)
+                if not is_better(new_quality, old_quality):
+                    kept.append(_kept_row(music, item, existing, new_quality, old_quality))
+                    continue
+                replaced = existing
+            else:
+                replaced = None
+            lyrics_synced = _attach_lyrics(item, merged, settings, source)
+            file_cover = cover if settings.get("embed_cover", True) else None
+            write_tags(path, merged, cover=file_cover, only_missing=not settings.get("overwrite_tags"))
+            _place_file(path, dest, replaced)
             if lyrics_synced:
-                sidecar = place.with_suffix(".lrc")
+                sidecar = dest.with_suffix(".lrc")
                 sidecar.write_text(lyrics_synced + "\n", encoding="utf-8")
                 hand_over(sidecar)
             if cover and settings.get("write_cover_file", True):
-                _write_cover_file(place.parent, cover)
-            moved.append((path, place, merged))
+                _write_cover_file(dest.parent, cover)
+            if replaced is not None:
+                new_label = quality_label(path.suffix, new_quality)
+                old_label = quality_label(replaced.suffix, old_quality)
+                detail = f"ersetzt ({new_label} statt {old_label})"
+            else:
+                detail = ""
+            moved.append((path, dest, merged, detail))
+            index["rows"] = None
     except (TagError, OSError) as exc:
         logger.exception("Import von %s", group["key"])
         message = explain_io(exc)
         _remember(group, status="error", score=0, reason=message, dest="", cover="", files=[])
         _log("error", f"{group['key']}: {message}")
         return {"status": "error", "count": len(moved), "message": message}
-    for path in duplicates:
-        if path.exists():
-            _sideline(path, "_duplikate", group["key"])
 
     def mut(data):
         data["items"].pop(group["key"], None)
-        for src, dest, merged in moved:
+        for src, dest, merged, detail in moved:
             rel = dest.relative_to(music).as_posix()
+            message = f"{merged.artist or merged.albumartist} – {merged.title} → {rel}"
+            if detail:
+                message = f"{merged.artist or merged.albumartist} – {merged.title} {detail} → {rel}"
             data["log"].append(
                 {
                     "time": now(),
                     "level": "info",
-                    "message": f"{merged.artist or merged.albumartist} – {merged.title} → {rel}",
+                    "message": message,
                     "src": src.name,
                     "dest": rel,
                 }
             )
-        if duplicates:
-            data["log"].append(
-                {
-                    "time": now(),
-                    "level": "warn",
-                    "message": f"{group['key']}: {len(duplicates)} Duplikat(e) nach _duplikate gelegt",
-                }
-            )
 
     update(mut)
-    status = "moved" if moved else ("duplicate" if duplicates else "empty")
-    return {"status": status, "count": len(moved), "duplicates": len(duplicates)}
+    if kept:
+        files = [item["file"] for item in kept]
+        reason = files[0]["note"] if len(files) == 1 else f"{len(files)} Titel sind schon in der Bibliothek, in gleicher oder besserer Qualität."
+        kept_group = {"key": group["key"], "paths": [item["path"] for item in kept]}
+        preview = files[0].get("existing") or ""
+        _remember(
+            kept_group,
+            status="duplicate",
+            score=min(item["score"] for item in kept),
+            reason=reason,
+            dest=preview,
+            cover=_store_cover(group["key"], cover),
+            files=files,
+        )
+        _log("info", f"{group['key']}: {reason}")
+        message = reason
+        if moved:
+            message = f"{len(moved)} Datei(en) einsortiert. {reason}"
+        return {"status": "duplicate", "count": len(moved), "kept": len(kept), "message": message}
+    status = "moved" if moved else "empty"
+    return {"status": status, "count": len(moved), "kept": 0, "message": f"{len(moved)} Datei(en) einsortiert" if moved else ""}
+
+
+def _attach_lyrics(item, merged: Tags, settings: dict, source) -> str:
+    if not _want_lyrics(item["tags"], settings):
+        return ""
+    try:
+        plain, synced = source.lyrics_for(item["meta"], item["tags"].duration or item["hint"].duration)
+    except Exception:
+        logger.exception("Songtext")
+        return ""
+    if plain and (settings.get("overwrite_tags") or not merged.lyrics):
+        merged.lyrics = plain
+    return synced or ""
+
+
+def _place_file(src: Path, dest: Path, replaced: Path | None) -> None:
+    ensure_dir(dest.parent)
+    temporary = dest.with_name(f".{dest.name}.musik-import")
+    shutil.copy2(src, temporary)
+    try:
+        os.replace(temporary, dest)
+    except OSError:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+    hand_over(dest)
+    if replaced is not None and replaced.exists():
+        try:
+            same = replaced.resolve() == dest.resolve()
+        except OSError:
+            same = False
+        if not same:
+            replaced.unlink()
+            sidecar = replaced.with_suffix(".lrc")
+            new_sidecar = dest.with_suffix(".lrc")
+            if sidecar.is_file() and sidecar.resolve() != new_sidecar.resolve():
+                sidecar.unlink()
+    if src.exists():
+        try:
+            if src.resolve() != dest.resolve():
+                src.unlink()
+        except OSError:
+            logger.exception("Import-Datei bleibt liegen: %s", src)
+
+
+def _wanted(merged: Tags, item) -> dict:
+    return {
+        "title": merged.title,
+        "artist": merged.artist or merged.albumartist,
+        "albumartist": merged.albumartist,
+        "mb": merged.mb_recording_id,
+        "duration": item["tags"].duration or item["hint"].duration,
+    }
+
+
+def _find_matches(music: Path, dest: Path, wanted: dict, index: dict) -> list[Path]:
+    if not wanted.get("title") and not wanted.get("mb"):
+        return [dest] if dest.is_file() else []
+    matches = _match_paths(wanted, _nearby_paths(music, dest))
+    if matches:
+        return matches
+    rows = index.get("rows")
+    if rows is None:
+        rows = [_row_for(path) for path in _audio_under(music) if not _in_import(path)]
+        index["rows"] = rows
+    return [row["path"] for row in rows if _same(wanted, row)]
+
+
+def _nearby_paths(music: Path, dest: Path) -> list[Path]:
+    paths: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(path: Path) -> None:
+        if path in seen or _in_import(path):
+            return
+        seen.add(path)
+        paths.append(path)
+
+    if dest.is_file():
+        add(dest)
+    folders = []
+    if dest.parent.is_dir():
+        folders.append(dest.parent)
+    artist = dest.parent.parent
+    if artist.is_dir() and artist != dest.parent and artist != music and music in artist.parents:
+        folders.append(artist)
+    for folder in folders:
+        for path in _audio_under(folder):
+            add(path)
+    return paths
+
+
+def _match_paths(wanted: dict, paths: list[Path]) -> list[Path]:
+    return [path for path in paths if _same(wanted, _row_for(path))]
+
+
+def _audio_under(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    found = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name.startswith(".") or path.suffix.lower() not in AUDIO_EXT:
+            continue
+        parts = path.relative_to(root).parts[:-1]
+        if any(part in IGNORED_DIRS or part.startswith(".") for part in parts):
+            continue
+        found.append(path)
+    return found
+
+
+def _row_for(path: Path) -> dict:
+    try:
+        tags = read_tags(path)
+    except TagError:
+        tags = Tags()
+    parsed = parse_filename(path.stem)
+    return {
+        "path": path,
+        "title": tags.title or parsed.get("title") or "",
+        "artist": tags.artist or parsed.get("artist") or "",
+        "albumartist": tags.albumartist or "",
+        "mb": tags.mb_recording_id,
+        "duration": tags.duration,
+    }
+
+
+def _same(wanted: dict, row: dict) -> bool:
+    if wanted.get("mb") and row.get("mb") and wanted["mb"] == row["mb"]:
+        return True
+    if similarity(wanted.get("title"), row.get("title")) < 0.92:
+        return False
+    artist = wanted.get("artist") or wanted.get("albumartist") or ""
+    if not artist:
+        return False
+    others = [row.get("artist") or "", row.get("albumartist") or ""]
+    if not any(similarity(artist, item) >= 0.92 for item in others if item):
+        return False
+    left = wanted.get("duration") or 0
+    right = row.get("duration") or 0
+    if left and right and abs(float(left) - float(right)) > 10:
+        return False
+    return True
+
+
+def _in_import(path: Path) -> bool:
+    root = import_dir().resolve()
+    try:
+        path.resolve().relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _quality_rank(path: Path) -> tuple[int, int, int, int]:
+    quality = read_quality(path)
+    if quality.lossless:
+        return (1, quality.bits, quality.sample_rate, quality.bitrate)
+    return (0, 0, 0, quality.bitrate)
+
+
+def _public_row(item, *, note: str, existing: str, duplicate: bool) -> dict:
+    meta = item["meta"]
+    hint = item["hint"]
+    path: Path = item["path"]
+    return {
+        "path": path,
+        "score": item["score"],
+        "file": {
+            "rel": hint.key,
+            "name": path.name,
+            "title": meta.title or hint.title,
+            "artist": meta.artist or hint.artist,
+            "album": meta.album or hint.album,
+            "albumartist": meta.albumartist or hint.albumartist,
+            "year": meta.year or hint.year,
+            "track": meta.track if meta.track is not None else hint.track,
+            "disc": meta.disc if meta.disc is not None else hint.disc,
+            "genre": meta.genre or hint.genre,
+            "score": item["score"],
+            "source": meta.source,
+            "has_cover": bool(item["tags"].has_cover),
+            "has_lyrics": bool(item["tags"].lyrics),
+            "size": path.stat().st_size if path.exists() else 0,
+            "duplicate": duplicate,
+            "existing": existing,
+            "note": note,
+        },
+    }
+
+
+def _kept_row(music: Path, item, existing: Path, new_quality, old_quality) -> dict:
+    try:
+        rel = existing.relative_to(music).as_posix()
+    except ValueError:
+        rel = existing.name
+    new_label = quality_label(item["path"].suffix, new_quality)
+    old_label = quality_label(existing.suffix, old_quality)
+    note = f"Schon vorhanden ({old_label}): {rel}. Diese Datei hat {new_label} und bleibt im Import."
+    return _public_row(item, note=note, existing=rel, duplicate=True)
+
+
+def _blocked_row(item, dest: Path) -> dict:
+    try:
+        rel = dest.relative_to(music_dir()).as_posix()
+    except ValueError:
+        rel = dest.name
+    note = f"Der Name ist schon belegt ({rel}) und gehört zu einem anderen Titel. Diese Datei bleibt im Import."
+    return _public_row(item, note=note, existing=rel, duplicate=True)
+
+
+def _store_cover(key: str, cover: bytes | None) -> str:
+    if not cover:
+        return ""
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    ext = ".png" if image_mime(cover) == "image/png" else ".jpg"
+    path = config_dir() / "covers" / f"{digest}{ext}"
+    ensure_dir(path.parent)
+    path.write_bytes(cover)
+    hand_over(path)
+    return str(path)
+
+
+def _group_has_art(group, item) -> bool:
+    raw = item.get("cover") or ""
+    if raw and Path(raw).is_file():
+        return True
+    for path in group["paths"]:
+        if read_cover(path):
+            return True
+    if group["paths"] and _local_cover(group["paths"], group):
+        return True
+    return False
 
 
 def _compose_tags(current: Tags, meta: TrackMeta, hint: Hint, settings: dict) -> Tags:
@@ -440,8 +762,13 @@ def _want_lyrics(tags: Tags, settings: dict) -> bool:
 
 
 def _cover_bytes(paths, group, metas, settings, source) -> bytes | None:
+    for path in paths:
+        embedded = read_cover(path)
+        if embedded:
+            return embedded
+    local = _local_cover(paths, group)
     if not settings.get("fetch_cover", True):
-        return _local_cover(paths, group)
+        return local
     primary = next((meta for meta in metas if meta.mb_release_id), metas[0] if metas else None)
     data = None
     if primary is not None:
@@ -450,7 +777,7 @@ def _cover_bytes(paths, group, metas, settings, source) -> bytes | None:
         except Exception:
             logger.exception("Cover")
             data = None
-    return data or _local_cover(paths, group)
+    return data or local
 
 
 def _local_cover(paths, group) -> bytes | None:
@@ -488,12 +815,6 @@ def _write_cover_file(folder: Path, cover: bytes) -> None:
     hand_over(target)
 
 
-def _plan(src: Path, dest: Path) -> tuple[Path, str]:
-    if dest.exists():
-        return dest, "duplicate"
-    return dest, "move"
-
-
 def _sideline(path: Path, folder: str, key: str) -> None:
     dest_dir = import_dir() / folder / key
     ensure_dir(dest_dir)
@@ -505,15 +826,7 @@ def _sideline(path: Path, folder: str, key: str) -> None:
 
 
 def _remember_held(group, decisions, cover: bytes | None, settings: dict) -> None:
-    cover_file = ""
-    if cover:
-        digest = hashlib.sha1(group["key"].encode("utf-8")).hexdigest()[:16]
-        ext = ".png" if image_mime(cover) == "image/png" else ".jpg"
-        path = config_dir() / "covers" / f"{digest}{ext}"
-        ensure_dir(path.parent)
-        path.write_bytes(cover)
-        hand_over(path)
-        cover_file = str(path)
+    cover_file = _store_cover(group["key"], cover)
     files = []
     scores = []
     for item in decisions:

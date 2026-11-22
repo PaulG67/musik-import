@@ -82,6 +82,13 @@
     .files { width: 100%; border-collapse: collapse; }
     .files th { text-align: left; font-size: .75rem; color: var(--muted); font-weight: 600; padding: .3rem; }
     .files td { padding: .3rem; vertical-align: middle; }
+    .duplicate {
+      display: flex; gap: .8rem; align-items: center; justify-content: space-between;
+      margin-top: .8rem; padding: .75rem .85rem; border-radius: 12px;
+      background: #fff7ea; border: 1px solid #ead7b6;
+    }
+    .duplicate p { margin: 0; color: var(--warn); font-size: .92rem; line-height: 1.4; }
+    .duplicate button { flex: none; white-space: nowrap; }
     input, select {
       font: inherit;
       width: 100%;
@@ -384,9 +391,10 @@
         const body = el("div");
         body.append(el("div", group.single ? "Datei" : "Album", "kicker"));
         body.append(el("h2", group.key));
-        const bits = [group.reason || ""];
-        if (group.dest) bits.push("Ziel: " + group.dest);
-        if (group.score != null) bits.push("Wert " + group.score);
+        const duplicates = (group.files || []).filter((file) => file.duplicate);
+        const bits = [duplicates.length ? "Schon vorhanden. Die bessere Qualität bleibt in der Bibliothek." : (group.reason || "")];
+        if (!duplicates.length && group.dest) bits.push("Ziel: " + group.dest);
+        if (!duplicates.length && group.score != null) bits.push("Wert " + group.score);
         body.append(el("p", bits.filter(Boolean).join(" · "), "meta"));
 
         const albumartist = field((group.files[0] && group.files[0].albumartist) || "");
@@ -419,6 +427,16 @@
         }
         table.append(tbody);
         body.append(table);
+        for (const file of duplicates) {
+          const line = el("div", "", "duplicate");
+          line.append(el("p", file.note || "Diese Datei bleibt im Import."));
+          const remove = el("button", "Aus Import löschen");
+          remove.type = "button";
+          remove.className = "quiet";
+          remove.addEventListener("click", () => deleteFiles(group, [file.rel]));
+          line.append(remove);
+          body.append(line);
+        }
 
         const actions = el("div", "", "row-actions");
         actions.style.marginTop = ".8rem";
@@ -435,6 +453,13 @@
         retry.addEventListener("click", () => runGroup("/api/groups/retry", group));
         dismiss.addEventListener("click", () => runGroup("/api/groups/dismiss", group));
         actions.append(apply, retry, dismiss);
+        if (duplicates.length > 1) {
+          const remove = el("button", "Schlechtere aus dem Import löschen");
+          remove.type = "button";
+          remove.className = "danger";
+          remove.addEventListener("click", () => deleteFiles(group, duplicates.map((file) => file.rel)));
+          actions.append(remove);
+        }
         body.append(actions);
         grid.append(cover, body);
         panel.append(grid);
@@ -457,6 +482,25 @@
       const td = document.createElement("td");
       td.append(node);
       return td;
+    }
+
+    async function deleteFiles(group, rels) {
+      const question = rels.length > 1
+        ? "Diese Dateien aus dem Import löschen? Die Bibliothek bleibt unverändert."
+        : "Diese Datei aus dem Import löschen? Die Bibliothek bleibt unverändert.";
+      if (!window.confirm(question)) return;
+      setStatus("Lösche …");
+      try {
+        const result = await api("/api/groups/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: group.key, rels })
+        });
+        setStatus(result.message || "Aus dem Import gelöscht", "ok");
+        await refresh();
+      } catch (error) {
+        setStatus(error.message, "err");
+      }
     }
 
     async function runGroup(path, group, albumartist, album, year, rows) {
@@ -483,6 +527,7 @@
         else if (result.status === "moved") setStatus(result.count + " Datei(en) einsortiert", "ok");
         else if (result.status === "held") setStatus(result.message || "Bitte prüfen");
         else if (result.status === "dismissed") setStatus("Beiseite gelegt", "ok");
+        else if (result.status === "duplicate") setStatus(result.message || "Schon vorhanden");
         else setStatus(result.message || "Fertig", "ok");
         await refresh();
       } catch (error) {

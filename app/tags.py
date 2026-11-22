@@ -42,6 +42,35 @@ class TagError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class Quality:
+    bitrate: int = 0
+    lossless: bool = False
+    bits: int = 0
+    sample_rate: int = 0
+
+
+def is_better(new: Quality, old: Quality) -> bool:
+    if not new.lossless and new.bitrate <= 0:
+        return False
+    return _rank(new) > _rank(old)
+
+
+def quality_label(suffix: str, quality: Quality) -> str:
+    kind = (suffix or "").lstrip(".").upper() or "DATEI"
+    if quality.lossless:
+        return f"{kind} verlustfrei"
+    if quality.bitrate > 0:
+        return f"{round(quality.bitrate / 1000)} kbit/s {kind}"
+    return kind
+
+
+def _rank(quality: Quality) -> tuple[int, int, int, int]:
+    if quality.lossless:
+        return (1, quality.bits, quality.sample_rate, quality.bitrate)
+    return (0, 0, 0, quality.bitrate)
+
+
 @dataclass
 class Tags:
     title: str = ""
@@ -211,7 +240,7 @@ def _read_mp3(path: Path) -> Tags:
             if text:
                 tags.lyrics = text
                 break
-        tags.has_cover = any(isinstance(frame, APIC) for frame in id3.values())
+        tags.has_cover = bool(_picture_payloads(id3.values()))
         tags.mb_recording_id = _ufid(id3) or _txxx(id3, MB_RECORDING)
         tags.mb_release_id = _txxx(id3, MB_ALBUM)
         tags.mb_artist_id = _txxx(id3, MB_ARTIST)
@@ -448,3 +477,119 @@ def _write_mp4(path: Path, tags: Tags, cover: bytes | None) -> None:
 def _set_free(audio: MP4, name: str, value: str) -> None:
     if value:
         audio[f"----:com.apple.iTunes:{name}"] = [value.encode("utf-8")]
+
+
+def read_cover(path: Path) -> bytes | None:
+    key = _cover_key(path)
+    if key and key in _cover_cache:
+        return _cover_cache[key]
+    data = _read_cover(path)
+    if key:
+        if len(_cover_cache) > 100:
+            _cover_cache.clear()
+        _cover_cache[key] = data
+    return data
+
+
+def read_quality(path: Path) -> Quality:
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".mp3":
+            from mutagen.mp3 import MP3
+
+            return _quality_from(MP3(path).info, lossless=False)
+        if suffix == ".flac":
+            return _quality_from(FLAC(path).info, lossless=True)
+        if suffix == ".ogg":
+            return _quality_from(OggVorbis(path).info, lossless=False)
+        if suffix == ".opus":
+            return _quality_from(OggOpus(path).info, lossless=False)
+        if suffix in {".m4a", ".mp4", ".aac"}:
+            info = MP4(path).info
+            codec = str(getattr(info, "codec", "") or "").lower()
+            return _quality_from(info, lossless="alac" in codec)
+    except (MutagenError, OSError):
+        return Quality()
+    return Quality()
+
+
+_cover_cache: dict[str, bytes | None] = {}
+
+
+def _cover_key(path: Path) -> str:
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    return f"{path.resolve()}:{stat.st_mtime_ns}:{stat.st_size}"
+
+
+def _read_cover(path: Path) -> bytes | None:
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".mp3":
+            try:
+                id3 = ID3(path)
+            except ID3NoHeaderError:
+                return None
+            payloads = _picture_payloads(id3.values())
+            return payloads[0] if payloads else None
+        if suffix == ".flac":
+            payloads = _vorbis_pictures(FLAC(path))
+            return payloads[0] if payloads else None
+        if suffix == ".ogg":
+            payloads = _vorbis_pictures(OggVorbis(path))
+            return payloads[0] if payloads else None
+        if suffix == ".opus":
+            payloads = _vorbis_pictures(OggOpus(path))
+            return payloads[0] if payloads else None
+        if suffix in {".m4a", ".mp4", ".aac"}:
+            covers = MP4(path).get("covr") or []
+            if covers:
+                return bytes(covers[0])
+    except (MutagenError, OSError):
+        return None
+    return None
+
+
+def _quality_from(info, *, lossless: bool) -> Quality:
+    return Quality(
+        bitrate=int(getattr(info, "bitrate", 0) or 0),
+        lossless=lossless,
+        bits=int(getattr(info, "bits_per_sample", 0) or 0),
+        sample_rate=int(getattr(info, "sample_rate", 0) or 0),
+    )
+
+
+def _picture_payloads(frames) -> list[bytes]:
+    ranked: list[tuple[int, bytes]] = []
+    for frame in frames:
+        data = getattr(frame, "data", None)
+        if not data:
+            continue
+        mime = str(getattr(frame, "mime", "") or "")
+        if mime == "-->":
+            continue
+        frame_id = str(getattr(frame, "FrameID", "") or "")
+        if frame_id not in {"APIC", "PIC"} and not mime.lower().startswith("image/") and mime.upper() not in {"JPG", "JPEG", "PNG"}:
+            continue
+        kind = getattr(frame, "type", 99) or 99
+        ranked.append((0 if kind == 3 else 1, bytes(data)))
+    ranked.sort(key=lambda item: item[0])
+    return [payload for _, payload in ranked]
+
+
+def _vorbis_pictures(audio) -> list[bytes]:
+    ranked: list[tuple[int, bytes]] = []
+    for picture in list(getattr(audio, "pictures", []) or []):
+        if getattr(picture, "data", None):
+            ranked.append((0 if getattr(picture, "type", 99) == 3 else 1, bytes(picture.data)))
+    for item in list(audio.get("metadata_block_picture") or []):
+        try:
+            picture = Picture(base64.b64decode(item))
+        except (TypeError, ValueError):
+            continue
+        if picture.data:
+            ranked.append((0 if picture.type == 3 else 1, bytes(picture.data)))
+    ranked.sort(key=lambda item: item[0])
+    return [payload for _, payload in ranked]

@@ -5,13 +5,14 @@ from __future__ import annotations
 import logging
 import os
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
 from app.config import config_dir, import_dir, load_settings, music_dir, save_settings
 from app.layout import PRESET_LABELS, Fields, pattern_for, render_pattern, validate_pattern
 from app.navidrome import ping
-from app.organize import apply_group, cover_path, dismiss_group, inbox, retry_group, scan_once
+from app.organize import apply_group, cover_for, delete_import, dismiss_group, inbox, retry_group, scan_once
 from app.store import load
+from app.tags import image_mime
 
 logger = logging.getLogger("musik-import")
 
@@ -101,10 +102,23 @@ def create_app() -> Flask:
 
     @app.get("/api/cover")
     def get_cover():
-        path = cover_path(request.args.get("key") or "")
-        if path is None:
+        found = cover_for(request.args.get("key") or "")
+        if found is None:
             abort(404)
-        return send_file(path)
+        if isinstance(found, (bytes, bytearray)):
+            return Response(bytes(found), mimetype=image_mime(found))
+        return send_file(found)
+
+    @app.post("/api/groups/delete")
+    def post_delete():
+        payload = request.get_json(silent=True) or {}
+        key = payload.get("key") or ""
+        rels = payload.get("rels") or []
+        if not key:
+            return jsonify({"error": "Ordner fehlt"}), 400
+        if not isinstance(rels, list) or not rels:
+            return jsonify({"error": "Datei fehlt"}), 400
+        return jsonify(delete_import(key, [str(item) for item in rels]))
 
     @app.post("/api/scan")
     def post_scan():

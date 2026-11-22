@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from app.identify import TrackMeta, meta_from_hint
-from app.organize import _plan, _sideline, collect_groups, process_group
-from app.tags import Tags, read_tags, write_tags
+from app.organize import _sideline, collect_groups, delete_import, inbox, process_group
+from app.tags import Quality, Tags, read_cover, read_tags, write_tags
 
 
 class FakeSource:
@@ -123,13 +123,139 @@ def test_low_confidence_stays_in_import(roots):
     assert list(music.rglob("*.mp3")) == []
 
 
-def test_existing_target_is_left_alone(tmp_path: Path):
-    src = tmp_path / "neu.mp3"
-    dest = tmp_path / "01 - Rolling in the Deep.mp3"
-    src.write_bytes(b"new-audio")
-    dest.write_bytes(b"already-there")
-    _place, kind = _plan(src, dest)
-    assert kind == "duplicate"
+def _filing(**extra):
+    settings = {
+        "layout": "artist_album",
+        "custom_pattern": "",
+        "fetch_cover": False,
+        "fetch_lyrics": False,
+        "embed_cover": False,
+        "write_cover_file": False,
+        "overwrite_tags": False,
+        "auto_move": True,
+        "min_score": 70,
+        "prefer_existing": True,
+        "scan_after_import": False,
+    }
+    settings.update(extra)
+    return settings
+
+
+def _qualities(monkeypatch, rates: dict[str, Quality]):
+    def fake(path: Path) -> Quality:
+        return rates[path.name]
+
+    monkeypatch.setattr("app.organize.read_quality", fake)
+
+
+def test_embedded_cover_is_shown(roots):
+    imported, _music = roots
+    cover = b"\xff\xd8\xff" + b"\x11" * 32 + b"\xff\xd9"
+    path = imported / "song.mp3"
+    write_tags(path, Tags(title="Song", artist="Adele"), cover=cover, only_missing=False)
+    box = inbox()
+    group = box["groups"][0]
+    assert group["cover"] is True
+    assert group["files"][0]["has_cover"] is True
+    assert read_cover(path) == cover
+
+
+def test_worse_song_stays_in_import(roots, monkeypatch):
+    imported, music = roots
+    library = music / "Adele" / "21" / "01 - Rolling in the Deep.mp3"
+    write_tags(
+        library,
+        Tags(title="Rolling in the Deep", artist="Adele", album="21", albumartist="Adele", track=1, lyrics="alt"),
+        cover=None,
+        only_missing=False,
+    )
+    fresh = imported / "neu.mp3"
+    write_tags(
+        fresh,
+        Tags(title="Rolling in the Deep", artist="Adele", album="21", albumartist="Adele", track=1, lyrics="neu"),
+        cover=None,
+        only_missing=False,
+    )
+    _qualities(
+        monkeypatch,
+        {
+            "neu.mp3": Quality(bitrate=128_000),
+            "01 - Rolling in the Deep.mp3": Quality(bitrate=320_000),
+        },
+    )
+    result = process_group(collect_groups()[0], _filing(), FakeSource(), trust=False)
+    assert result["status"] == "duplicate"
+    assert "320 kbit/s" in result["message"]
+    assert "128 kbit/s" in result["message"]
+    assert fresh.is_file()
+    assert read_tags(library).lyrics == "alt"
+    group = inbox()["groups"][0]
+    assert group["files"][0]["duplicate"] is True
+    delete_import(group["key"], [group["files"][0]["rel"]])
+    assert not fresh.exists()
+    assert library.is_file()
+
+
+def test_better_song_replaces_existing(roots, monkeypatch):
+    imported, music = roots
+    library = music / "Adele" / "21" / "01 - Rolling in the Deep.mp3"
+    write_tags(
+        library,
+        Tags(title="Rolling in the Deep", artist="Adele", album="21", albumartist="Adele", track=1, lyrics="alt"),
+        cover=None,
+        only_missing=False,
+    )
+    fresh = imported / "neu.mp3"
+    write_tags(
+        fresh,
+        Tags(title="Rolling in the Deep", artist="Adele", album="21", albumartist="Adele", track=1, lyrics="neu"),
+        cover=None,
+        only_missing=False,
+    )
+    _qualities(
+        monkeypatch,
+        {
+            "neu.mp3": Quality(bitrate=320_000),
+            "01 - Rolling in the Deep.mp3": Quality(bitrate=128_000),
+        },
+    )
+    result = process_group(collect_groups()[0], _filing(), FakeSource(), trust=False)
+    assert result["status"] == "moved"
+    assert result["count"] == 1
+    assert not fresh.exists()
+    assert read_tags(library).lyrics == "neu"
+
+
+def test_better_copy_replaces_song_in_another_folder(roots, monkeypatch):
+    imported, music = roots
+    library = music / "Sonstiges" / "alt.mp3"
+    write_tags(
+        library,
+        Tags(title="Rolling in the Deep", artist="Adele", album="Andere", albumartist="Adele", lyrics="alt"),
+        cover=None,
+        only_missing=False,
+    )
+    fresh = imported / "neu.mp3"
+    write_tags(
+        fresh,
+        Tags(title="Rolling in the Deep", artist="Adele", album="21", albumartist="Adele", track=1, lyrics="neu"),
+        cover=None,
+        only_missing=False,
+    )
+    _qualities(
+        monkeypatch,
+        {
+            "neu.mp3": Quality(bitrate=320_000),
+            "alt.mp3": Quality(bitrate=128_000),
+        },
+    )
+    result = process_group(collect_groups()[0], _filing(), FakeSource(), trust=False)
+    assert result["status"] == "moved"
+    assert not library.exists()
+    assert not fresh.exists()
+    placed = music / "Adele" / "21" / "01 - Rolling in the Deep.mp3"
+    assert placed.is_file()
+    assert read_tags(placed).lyrics == "neu"
 
 
 def test_unwritable_library_stays_explained(roots, monkeypatch):
@@ -140,7 +266,7 @@ def test_unwritable_library_stays_explained(roots, monkeypatch):
     def denied(src, dst):
         raise PermissionError(13, "Permission denied", dst)
 
-    monkeypatch.setattr("app.organize.shutil.move", denied)
+    monkeypatch.setattr("app.organize.shutil.copy2", denied)
     group = collect_groups()[0]
     result = process_group(
         group,
