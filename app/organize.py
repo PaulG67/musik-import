@@ -14,6 +14,7 @@ from app.identify import Hint, TrackMeta, meta_from_hint
 from app.layout import Fields, destination, within_root
 from app.metadata import WebMetadata
 from app.navidrome import start_scan
+from app.ownership import ensure_dir, explain_io, hand_over
 from app.parse import disc_from_dirname, folder_hint, parse_filename
 from app.store import load, now, update
 from app.tags import AUDIO_EXT, TagError, Tags, image_mime, read_tags, write_tags
@@ -294,10 +295,11 @@ def _find_group(key: str) -> dict | None:
 def _commit(group, decisions, cover: bytes | None, settings: dict, source) -> dict:
     music = music_dir()
     try:
-        music.mkdir(parents=True, exist_ok=True)
+        ensure_dir(music)
     except OSError as exc:
-        _remember(group, status="error", score=0, reason=str(exc), dest="", cover="", files=[])
-        return {"status": "error", "count": 0, "message": str(exc)}
+        message = explain_io(exc)
+        _remember(group, status="error", score=0, reason=message, dest="", cover="", files=[])
+        return {"status": "error", "count": 0, "message": message}
     moved = []
     duplicates = []
     try:
@@ -325,18 +327,22 @@ def _commit(group, decisions, cover: bytes | None, settings: dict, source) -> di
             if kind == "duplicate":
                 duplicates.append(path)
                 continue
-            place.parent.mkdir(parents=True, exist_ok=True)
+            ensure_dir(place.parent)
             shutil.move(str(path), str(place))
+            hand_over(place)
             if lyrics_synced:
-                place.with_suffix(".lrc").write_text(lyrics_synced + "\n", encoding="utf-8")
+                sidecar = place.with_suffix(".lrc")
+                sidecar.write_text(lyrics_synced + "\n", encoding="utf-8")
+                hand_over(sidecar)
             if cover and settings.get("write_cover_file", True):
                 _write_cover_file(place.parent, cover)
             moved.append((path, place, merged))
     except (TagError, OSError) as exc:
         logger.exception("Import von %s", group["key"])
-        _remember(group, status="error", score=0, reason=str(exc), dest="", cover="", files=[])
-        _log("error", f"{group['key']}: {exc}")
-        return {"status": "error", "count": len(moved), "message": str(exc)}
+        message = explain_io(exc)
+        _remember(group, status="error", score=0, reason=message, dest="", cover="", files=[])
+        _log("error", f"{group['key']}: {message}")
+        return {"status": "error", "count": len(moved), "message": message}
     for path in duplicates:
         if path.exists():
             _sideline(path, "_duplikate", group["key"])
@@ -477,7 +483,9 @@ def _write_cover_file(folder: Path, cover: bytes) -> None:
     if any((folder / name).exists() for name in COVER_NAMES):
         return
     name = "cover.png" if image_mime(cover) == "image/png" else "cover.jpg"
-    (folder / name).write_bytes(cover)
+    target = folder / name
+    target.write_bytes(cover)
+    hand_over(target)
 
 
 def _plan(src: Path, dest: Path) -> tuple[Path, str]:
@@ -488,11 +496,12 @@ def _plan(src: Path, dest: Path) -> tuple[Path, str]:
 
 def _sideline(path: Path, folder: str, key: str) -> None:
     dest_dir = import_dir() / folder / key
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(dest_dir)
     target = dest_dir / path.name
     if target.exists():
         target = target.with_name(f"{path.stem}-{int(time.time())}{path.suffix}")
     shutil.move(str(path), str(target))
+    hand_over(target)
 
 
 def _remember_held(group, decisions, cover: bytes | None, settings: dict) -> None:
@@ -501,8 +510,9 @@ def _remember_held(group, decisions, cover: bytes | None, settings: dict) -> Non
         digest = hashlib.sha1(group["key"].encode("utf-8")).hexdigest()[:16]
         ext = ".png" if image_mime(cover) == "image/png" else ".jpg"
         path = config_dir() / "covers" / f"{digest}{ext}"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(path.parent)
         path.write_bytes(cover)
+        hand_over(path)
         cover_file = str(path)
     files = []
     scores = []

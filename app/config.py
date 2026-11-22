@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from app.layout import PRESETS, validate_pattern
+from app.ownership import ensure_dir, hand_over
 
 DEFAULTS = {
     "layout": "artist_year_album",
@@ -104,8 +105,9 @@ def save_settings(incoming: dict) -> dict:
         if error:
             raise ValueError(error)
     path = config_dir() / "settings.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(path.parent)
     path.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
+    hand_over(path)
     return clean
 
 

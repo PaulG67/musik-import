@@ -7,6 +7,7 @@ import threading
 from datetime import datetime
 
 from app.config import config_dir
+from app.ownership import ensure_dir, hand_over
 
 _lock = threading.Lock()
 
@@ -32,8 +33,9 @@ def update(mutator):
         mutator(data)
         data["log"] = list(data.get("log") or [])[-300:]
         path = config_dir() / "state.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_dir(path.parent)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        hand_over(path)
         return data
 
 

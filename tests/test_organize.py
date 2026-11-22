@@ -132,6 +132,39 @@ def test_existing_target_is_left_alone(tmp_path: Path):
     assert kind == "duplicate"
 
 
+def test_unwritable_library_stays_explained(roots, monkeypatch):
+    imported, _music = roots
+    path = imported / "Ace of Base - Happy Nation" / "01 - All That She Wants.mp3"
+    write_tags(path, Tags(), cover=None, only_missing=False)
+
+    def denied(src, dst):
+        raise PermissionError(13, "Permission denied", dst)
+
+    monkeypatch.setattr("app.organize.shutil.move", denied)
+    group = collect_groups()[0]
+    result = process_group(
+        group,
+        {
+            "layout": "artist_album",
+            "custom_pattern": "",
+            "fetch_cover": False,
+            "fetch_lyrics": False,
+            "embed_cover": False,
+            "write_cover_file": False,
+            "overwrite_tags": False,
+            "auto_move": True,
+            "min_score": 70,
+            "prefer_existing": True,
+            "scan_after_import": False,
+        },
+        FakeSource(),
+        trust=False,
+    )
+    assert result["status"] == "error"
+    assert result["message"].startswith("Keine Schreibrechte für")
+    assert path.exists()
+
+
 def test_duplicate_is_set_aside(roots):
     imported, _music = roots
     path = imported / "song.mp3"

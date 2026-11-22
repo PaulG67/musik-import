@@ -88,10 +88,12 @@ Platzhalter: `{albumartist}` `{artist}` `{album}` `{year}` `{genre}` `{disc}` `{
 | `NAVIDROME_URL` | leer | zum Beispiel `http://192.168.1.10:4533` |
 | `NAVIDROME_USER` / `NAVIDROME_PASSWORD` | leer | für `startScan` |
 | `ACOUSTID_API_KEY` | leer | optional, Fingerabdruck |
-| `PUID` / `PGID` | `99` / `100` | Unraid nobody/users |
+| `PUID` / `PGID` | `99` / `100` | Besitzer für Appdata, Import und Dateien in root-Ordnern |
 | `TZ` | `Europe/Zurich` | Zeitzone |
 
 Was du in der Web-UI speicherst, gilt danach vor den Variablen. Die drei Ordner kommen immer aus dem Container.
+
+Der Container schreibt als root in die Bibliothek, auch wenn ein vorhandener Albumordner dem Benutzer `nobody` nicht gehört. Eine neue Datei übernimmt den Besitzer dieses Ordners. Liegt der Ordner bei root, gilt `PUID`/`PGID`. Einstellungen und der Import-Ordner bleiben bei `PUID`/`PGID`.
 
 ## Lokal
 
