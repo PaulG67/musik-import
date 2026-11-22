@@ -31,6 +31,7 @@ from app.tags import (
     write_tags,
 )
 from app.textutil import similarity, year_of
+from app.unpack import unpack_pending
 
 logger = logging.getLogger("musik-import")
 
@@ -300,6 +301,12 @@ def _scan(source, settings: dict, *, force: bool) -> dict:
 
     state = load()
     index: dict = {}
+    for level, message in unpack_pending(
+        import_dir(),
+        force=force,
+        stable_seconds=int(settings["stable_seconds"]),
+    ):
+        _log(level, message)
     for group in collect_groups():
         if not group["paths"]:
             continue

@@ -54,3 +54,4 @@ def test_page_renders(tmp_path, monkeypatch):
     response = create_app().test_client().get("/")
     assert response.status_code == 200
     assert "Musik-Import" in response.get_data(as_text=True)
+    assert "ZIP" in response.get_data(as_text=True)

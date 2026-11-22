@@ -1,6 +1,6 @@
 # Musik-Import
 
-Neue Musik in den Import-Ordner legen. Die App liest die Dateien, ergänzt fehlende Angaben und verschiebt sie in die Navidrome-Bibliothek.
+Neue Musik in den Import-Ordner legen, auch als ZIP. Die App packt Archive aus, liest die Dateien, ergänzt fehlende Angaben und verschiebt sie in die Navidrome-Bibliothek.
 
 Ergänzt wird, was fehlt:
 
