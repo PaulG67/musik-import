@@ -2,10 +2,6 @@ import os
 import zipfile
 from pathlib import Path
 
-import io
-
-from PIL import Image
-
 from app.identify import TrackMeta, meta_from_hint
 from app.organize import _scan, collect_groups, inbox
 from app.tags import Tags, write_tags
@@ -85,9 +81,7 @@ def test_fresh_zip_waits_until_the_copy_settles(tmp_path, monkeypatch):
 def test_cover_in_the_archive_shows_on_the_overview(tmp_path, monkeypatch):
     imported = _root(tmp_path, monkeypatch)
     monkeypatch.setenv("MUSIC_DIR", str(tmp_path / "music"))
-    image = io.BytesIO()
-    Image.new("RGB", (8, 8), (180, 70, 30)).save(image, "JPEG")
-    _zip(imported / "Adele - 21.zip", {"01 - Song.mp3": b"audio", "Cover.JPG": image.getvalue()})
+    _zip(imported / "Adele - 21.zip", {"01 - Song.mp3": b"audio", "Cover.JPG": b"\xff\xd8\xff" + b"\x11" * 32 + b"\xff\xd9"})
     unpack_pending(imported, force=True, stable_seconds=0)
     group = inbox()["groups"][0]
     assert group["cover"] is True
